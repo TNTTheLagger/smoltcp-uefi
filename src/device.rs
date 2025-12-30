@@ -9,7 +9,7 @@ use smoltcp::{
 };
 use uefi::{
     Status,
-    proto::network::snp::{ReceiveFlags, SimpleNetwork},
+    proto::network::snp::SimpleNetwork,
 };
 
 use crate::convert::u2s_mac_address;
@@ -53,15 +53,13 @@ impl<'a, const MAX_PACKET: usize> SnpDevice<'a, MAX_PACKET> {
     /// Note that this will set receive filters on the [SimpleNetwork] as well.
     /// This may error if that fails.
     pub fn new(snp: &'a SimpleNetwork) -> Result<Self, uefi::Error> {
-        snp.receive_filters(
-            ReceiveFlags::UNICAST | ReceiveFlags::MULTICAST | ReceiveFlags::BROADCAST,
-            ReceiveFlags::empty(),
-            false,
-            None,
-        )?;
-
+        // IMPORTANT:
+        // Receive filters MUST be configured exactly once by the caller.
+        // Reconfiguring them here causes INVALID_PARAMETER on real hardware.
         Ok(Self { snp })
     }
+
+
 
     /// Get the current MAC address configured on the underlying [SimpleNetwork].
     pub fn current_address(&self) -> EthernetAddress {
@@ -122,9 +120,14 @@ impl<'a, const MAX_PACKET: usize> Device for SnpDevice<'a, MAX_PACKET> {
     fn capabilities(&self) -> smoltcp::phy::DeviceCapabilities {
         let mut caps = DeviceCapabilities::default();
         caps.medium = Medium::Ethernet;
-        caps.max_transmission_unit = min(self.snp.mode().max_packet_size as usize, MAX_PACKET);
+
+        let mode = self.snp.mode();
+        let mtu = (mode.max_packet_size + mode.media_header_size) as usize;
+
+        caps.max_transmission_unit = min(mtu, MAX_PACKET);
         caps
     }
+
 }
 
 pub struct SnpRxToken<const MAX_PACKET: usize> {
